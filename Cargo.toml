@@ -1,0 +1,15 @@
+[package]
+name = "hotreload"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AmionSky/hotreload"
+description = "A simple crate to hotreload toml config files"
+keywords = ["hotreload", "config", "toml"]
+categories = ["config"]
+
+[dependencies]
+thiserror = "1.0.0"
+serde = "1.0.0"
+toml = "0.8.0"
+notify = "6.0.0"
