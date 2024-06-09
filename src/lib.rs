@@ -112,6 +112,7 @@ pub enum HotreloadError {
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 mod tests {
     use super::*;
 
