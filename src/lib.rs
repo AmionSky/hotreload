@@ -1,14 +1,13 @@
+mod apply;
+
+pub use apply::*;
+
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::fs::File;
 use std::io::{ErrorKind, Read};
 use std::marker::PhantomData;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use thiserror::Error;
-
-pub trait HotreloadApply<D> {
-    fn apply(&self, data: D);
-}
 
 pub struct Hotreload<C, D> {
     config: Arc<C>,
@@ -18,13 +17,13 @@ pub struct Hotreload<C, D> {
 
 impl<C, D> Hotreload<C, D>
 where
-    C: HotreloadApply<D> + Default + Send + Sync + 'static,
+    C: Apply<D> + Default + Send + Sync + 'static,
     D: serde::de::DeserializeOwned,
 {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, HotreloadError> {
+    pub fn new<P: Into<PathBuf>>(path: P) -> Result<Self, Error> {
         // Get path of the config file containing directory
-        let path = path.as_ref().to_path_buf();
-        let watch_path = path.parent().ok_or(HotreloadError::NoParent)?.to_path_buf();
+        let path: PathBuf = path.into();
+        let watch_path = path.parent().ok_or(Error::NoParent)?.to_path_buf();
 
         // Init config type
         let config = Arc::new(Self::init(&path)?);
@@ -58,43 +57,43 @@ where
         &self.config
     }
 
-    fn init<P: AsRef<Path>>(path: P) -> Result<C, HotreloadError> {
+    fn init<P: AsRef<Path>>(path: P) -> Result<C, Error> {
         let data = Self::load_data(path)?;
         let config = C::default();
-        config.apply(data);
+        config.apply(data).map_err(Error::Apply)?;
         Ok(config)
     }
 
-    fn reload<P: AsRef<Path>>(config: &C, path: P) -> Result<(), HotreloadError> {
-        config.apply(Self::load_data(path)?);
+    fn reload<P: AsRef<Path>>(config: &C, path: P) -> Result<(), Error> {
+        let data = Self::load_data(path)?;
+        config.apply(data).map_err(Error::Apply)?;
         Ok(())
     }
 
-    fn load_data<P: AsRef<Path>>(path: P) -> Result<D, HotreloadError> {
+    fn load_data<P: AsRef<Path>>(path: P) -> Result<D, Error> {
         // Open file
         let mut file = match File::open(path) {
             Ok(file) => file,
             Err(error) => {
                 return Err(match error.kind() {
-                    ErrorKind::NotFound => HotreloadError::NotFound(error),
-                    ErrorKind::PermissionDenied => HotreloadError::PermissionDenied(error),
-                    _ => HotreloadError::Io(error),
+                    ErrorKind::NotFound => Error::NotFound(error),
+                    ErrorKind::PermissionDenied => Error::PermissionDenied(error),
+                    _ => Error::Io(error),
                 })
             }
         };
 
         // Read content
         let mut buffer = String::new();
-        file.read_to_string(&mut buffer)
-            .map_err(HotreloadError::FileRead)?;
+        file.read_to_string(&mut buffer).map_err(Error::FileRead)?;
 
         // Deserialize
-        toml::from_str(&buffer).map_err(HotreloadError::Deserialize)
+        toml::from_str(&buffer).map_err(Error::Deserialize)
     }
 }
 
-#[derive(Debug, Error)]
-pub enum HotreloadError {
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
     #[error("Config file not found: {0}")]
     NotFound(#[source] std::io::Error),
     #[error("Config file permission denied: {0}")]
@@ -109,24 +108,6 @@ pub enum HotreloadError {
     Notify(#[from] notify::Error),
     #[error("Path doesn't have a parent")]
     NoParent,
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-mod tests {
-    use super::*;
-
-    struct TestConfig {
-        number: std::sync::Mutex<i32>,
-    }
-
-    struct TestData {
-        number: i32,
-    }
-
-    impl HotreloadApply<TestData> for TestConfig {
-        fn apply(&self, data: TestData) {
-            *self.number.lock().unwrap() = data.number;
-        }
-    }
+    #[error("Failed to apply new config: {0}")]
+    Apply(#[source] Box<dyn std::error::Error>),
 }

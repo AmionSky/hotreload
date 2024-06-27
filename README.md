@@ -5,6 +5,8 @@ A simple crate to hotreload toml config files.
 ## Usage
 
 ```rust
+use hotreload::{Hotreload, Apply};
+
 #[derive(Default)]
 struct Config {
     value: Mutex<i32>
@@ -15,13 +17,14 @@ struct Data {
     value: i32
 }
 
-impl HotreloadApply<Data> for Config {
-    fn apply(&self, data: Data) {
+impl Apply<Data> for Config {
+    fn apply(&self, data: Data) -> hotreload::ApplyResult {
         *self.value.lock().unwrap() = data.value;
+        Ok(())
     }
 }
 
-fn example() -> Result<(), HotreloadError> {
+fn example() -> Result<(), hotreload::Error> {
     let watcher = Hotreload::<Config, Data>::new("my-config.toml")?;
     let config: Arc<Config> = watcher.config().clone()
 }
