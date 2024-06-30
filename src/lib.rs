@@ -60,13 +60,13 @@ where
     fn init<P: AsRef<Path>>(path: P) -> Result<C, Error> {
         let data = Self::load_data(path)?;
         let config = C::default();
-        config.apply(data).map_err(Error::Apply)?;
+        config.apply(data).map_err(|e| Error::Apply(e.to_string()))?;
         Ok(config)
     }
 
     fn reload<P: AsRef<Path>>(config: &C, path: P) -> Result<(), Error> {
         let data = Self::load_data(path)?;
-        config.apply(data).map_err(Error::Apply)?;
+        config.apply(data).map_err(|e| Error::Apply(e.to_string()))?;
         Ok(())
     }
 
@@ -109,5 +109,5 @@ pub enum Error {
     #[error("Path doesn't have a parent")]
     NoParent,
     #[error("Failed to apply new config: {0}")]
-    Apply(#[source] Box<dyn std::error::Error>),
+    Apply(String),
 }
