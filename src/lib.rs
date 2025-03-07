@@ -1,24 +1,21 @@
-mod apply;
-
-pub use apply::*;
-
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
-use std::fs::File;
 use std::io::{ErrorKind, Read};
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-pub struct Hotreload<C, D> {
-    config: Arc<C>,
-    _watcher: RecommendedWatcher,
-    _data: PhantomData<D>,
+pub trait Reload {
+    type Data: serde::de::DeserializeOwned;
+    fn apply(&self, data: Self::Data) -> Result<(), Box<dyn std::error::Error>>;
 }
 
-impl<C, D> Hotreload<C, D>
+pub struct Hotreload<C> {
+    config: Arc<C>,
+    _watcher: RecommendedWatcher,
+}
+
+impl<C> Hotreload<C>
 where
-    C: Apply<D> + Default + Send + Sync + 'static,
-    D: serde::de::DeserializeOwned,
+    C: Reload + Default + Send + Sync + 'static,
 {
     pub fn new<P: Into<PathBuf>>(path: P) -> Result<Self, Error> {
         // Get path of the config file containing directory
@@ -26,8 +23,11 @@ where
         let watch_path = path.parent().ok_or(Error::NoParent)?.to_path_buf();
 
         // Init config type
-        let config = Arc::new(Self::init(&path)?);
+        let config = Arc::new(C::default());
         let config_clone = config.clone();
+
+        // Load config file
+        Self::reload(&config, &path)?;
 
         // Create & Start file watcher
         type NotifyRes = notify::Result<notify::Event>;
@@ -49,7 +49,6 @@ where
         Ok(Self {
             config,
             _watcher: watcher,
-            _data: PhantomData,
         })
     }
 
@@ -57,38 +56,10 @@ where
         &self.config
     }
 
-    fn init<P: AsRef<Path>>(path: P) -> Result<C, Error> {
-        let data = Self::load_data(path)?;
-        let config = C::default();
-        config.apply(data).map_err(|e| Error::Apply(e.to_string()))?;
-        Ok(config)
-    }
-
     fn reload<P: AsRef<Path>>(config: &C, path: P) -> Result<(), Error> {
-        let data = Self::load_data(path)?;
-        config.apply(data).map_err(|e| Error::Apply(e.to_string()))?;
-        Ok(())
-    }
-
-    fn load_data<P: AsRef<Path>>(path: P) -> Result<D, Error> {
-        // Open file
-        let mut file = match File::open(path) {
-            Ok(file) => file,
-            Err(error) => {
-                return Err(match error.kind() {
-                    ErrorKind::NotFound => Error::NotFound(error),
-                    ErrorKind::PermissionDenied => Error::PermissionDenied(error),
-                    _ => Error::Io(error),
-                })
-            }
-        };
-
-        // Read content
-        let mut buffer = String::new();
-        file.read_to_string(&mut buffer).map_err(Error::FileRead)?;
-
-        // Deserialize
-        toml::from_str(&buffer).map_err(Error::Deserialize)
+        let file = load_file(path)?;
+        let data = toml::from_str(&file).map_err(Error::Deserialize)?;
+        config.apply(data).map_err(Error::Apply)
     }
 }
 
@@ -109,5 +80,24 @@ pub enum Error {
     #[error("Path doesn't have a parent")]
     NoParent,
     #[error("Failed to apply new config: {0}")]
-    Apply(String),
+    Apply(#[source] Box<dyn std::error::Error>),
+}
+
+fn load_file<P: AsRef<Path>>(path: P) -> Result<String, Error> {
+    // Open file
+    let mut file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) => {
+            return Err(match error.kind() {
+                ErrorKind::NotFound => Error::NotFound(error),
+                ErrorKind::PermissionDenied => Error::PermissionDenied(error),
+                _ => Error::Io(error),
+            });
+        }
+    };
+
+    // Read content
+    let mut buffer = String::new();
+    file.read_to_string(&mut buffer).map_err(Error::FileRead)?;
+    Ok(buffer)
 }
