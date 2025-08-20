@@ -37,6 +37,7 @@ where
                     && event.paths[0] == path
                     && (event.kind.is_modify() || event.kind.is_create())
                 {
+                    #[allow(clippy::collapsible_if)]
                     if let Err(error) = Self::reload(&config_clone, &path) {
                         eprintln!("Failed to hotreload config: {}", error);
                     }
